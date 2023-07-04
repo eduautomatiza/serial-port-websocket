@@ -15,18 +15,18 @@ class SerialToQueue(serial.threaded.Protocol):
 
 
 class SerialProcess(multiprocessing.Process):
-    def __init__(
-        self,
-        queue,
-        config,
-    ):
+    def __init__(self, serial2web, web2serial, config):
         multiprocessing.Process.__init__(self)
-        self.queue = queue
+        self.serial2web = serial2web
+        self.web2serial = web2serial
+
         self.port = config["serial_port"]["port"]
         self.baudrate = config["serial_port"]["baudrate"]
+
         self.sp = serial.Serial(port=self.port, baudrate=self.baudrate, timeout=1)
         self.sp.flushInput()
-        ser_to_net = SerialToQueue(self.queue.data.output)
+
+        ser_to_net = SerialToQueue(self.serial2web)
         serial_worker = serial.threaded.ReaderThread(self.sp, ser_to_net)
         serial_worker.start()
 
@@ -40,4 +40,4 @@ class SerialProcess(multiprocessing.Process):
 
     def run(self):
         while True:
-            self.sp.write(self.queue.data.input.get().encode())
+            self.sp.write(self.web2serial.get().encode())
