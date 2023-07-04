@@ -13,12 +13,25 @@ import serialworker
 import json
 import configparser
 
-clients = []
+from dataclasses import dataclass
 
-input_data_queue = multiprocessing.Queue()
-output_data_queue = multiprocessing.Queue()
-input_control_queue = multiprocessing.Queue()
-output_control_queue = multiprocessing.Queue()
+@dataclass
+class serverQueueIo:
+    input: multiprocessing.Queue()
+    output: multiprocessing.Queue()
+
+
+@dataclass
+class serverQueue:
+    data: serverQueueIo
+    control: serverQueueIo
+
+
+clients = []
+server_queue = serverQueue(
+    data=(serverQueueIo(multiprocessing.Queue(), multiprocessing.Queue())),
+    control=(serverQueueIo(multiprocessing.Queue(), multiprocessing.Queue())),
+)
 
 
 class IndexHandler(tornado.web.RequestHandler):
@@ -40,7 +53,7 @@ class WebSocketHandler(tornado.websocket.WebSocketHandler):
 
     def on_message(self, message):
         print("tornado received from client: %s" % json.dumps(message))
-        input_data_queue.put(message)
+        server_queue.data.input.put(message)
 
     def on_close(self):
         print("connection closed")
@@ -49,8 +62,8 @@ class WebSocketHandler(tornado.websocket.WebSocketHandler):
 
 # check the queue for pending messages, and rely that to all connected clients
 def checkQueue():
-    if not output_data_queue.empty():
-        message = output_data_queue.get()
+    if not server_queue.data.output.empty():
+        message = server_queue.data.output.get()
         for c in clients:
             c.write_message(message)
 
@@ -60,13 +73,7 @@ if __name__ == "__main__":
     config.read("./server.cfg")
     webPort = config["web_server"]["port"]
     # start the serial worker in background (as a deamon)
-    sp = serialworker.SerialProcess(
-        input_data_queue,
-        output_data_queue,
-        input_control_queue,
-        output_control_queue,
-        config,
-    )
+    sp = serialworker.SerialProcess(server_queue, config)
     sp.daemon = True
     sp.start()
     app = tornado.web.Application(

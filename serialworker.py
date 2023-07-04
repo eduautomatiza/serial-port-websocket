@@ -1,64 +1,43 @@
 import serial
-import time
 import multiprocessing
-from datetime import datetime
+import serial.threaded
+
+
+class SerialToQueue(serial.threaded.Protocol):
+    def __init__(self, queue):
+        self.queue = queue
+
+    def __call__(self):
+        return self
+
+    def data_received(self, data):
+        self.queue.put(data)
+
 
 class SerialProcess(multiprocessing.Process):
     def __init__(
         self,
-        input_data_queue,
-        output_data_queue,
-        input_control_queue,
-        output_control_queue,
+        queue,
         config,
     ):
         multiprocessing.Process.__init__(self)
-        self.input_data_queue = input_data_queue
-        self.output_data_queue = output_data_queue
-        self.input_control_queue = input_control_queue
-        self.output_control_queue = output_control_queue
+        self.queue = queue
         self.port = config["serial_port"]["port"]
-        self.baudRate = config["serial_port"]["baudrate"]
-        self.sp = serial.Serial(self.port, self.baudRate, timeout=1)
-        if self.sp.is_open:
-            print(
-                "success opening port",
-                config["serial_port"]["port"],
-            )
-        else:
-            print(
-                "failed to open port",
-                config["serial_port"]["port"],
-            )
+        self.baudrate = config["serial_port"]["baudrate"]
+        self.sp = serial.Serial(port=self.port, baudrate=self.baudrate, timeout=1)
+        self.sp.flushInput()
+        ser_to_net = SerialToQueue(self.queue.data.output)
+        serial_worker = serial.threaded.ReaderThread(self.sp, ser_to_net)
+        serial_worker.start()
 
     def close(self):
         self.sp.close()
 
-    def writeSerial(self, data):
-        self.sp.write(data.encode())
-        # time.sleep(1)
-
-    def readSerial(self, n):
-        return self.sp.readline()
+    def open(self):
+        if self.sp.is_open is False:
+            self.sp.open()
+            self.sp.flushInput()
 
     def run(self):
-        self.sp.flushInput()
-
         while True:
-            # look for incoming tornado request
-            if not self.input_data_queue.empty():
-                data = self.input_data_queue.get()
-                # send it to the serial device
-                self.writeSerial(data)
-                print("2-writing to serial: ", data)
-
-            # look for incoming serial data
-            n = self.sp.inWaiting()
-            if n > 0:
-                print("read serial n bytes: ", n)
-                data = self.readSerial(n)
-                print("reading from serial: ", data)
-                # send it back to tornado
-                self.output_data_queue.put(data)
-
-            print(datetime.now().strftime("%H:%M:%S.%f"))
+            self.sp.write(self.queue.data.input.get().encode())
